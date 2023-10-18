@@ -18,15 +18,7 @@ import upickle.default.*
 object Bookstore {
   case class Book(title: String, author: Author) derives ReadWriter
   case class Author(name: String, country: String) derives ReadWriter
-  case class Review(book: Book, text: String) derives ReadWriter
-  //Make sentiment a GADT
-  case class EnrichedReview(review: Review, sentiment: Boolean = false) derives ReadWriter
-  def enrichReview(review: Review): EnrichedReview = {
-    ???
-  }
-  def calculateReviewScore(book: Book, reviews: List[EnrichedReview]): Int = {
-    reviews.filter(_.review.book == book).count(_.sentiment)
-  }
+
 }
 //object BookstorePlayground {
 //  @main
