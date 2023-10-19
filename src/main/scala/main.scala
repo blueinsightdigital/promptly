@@ -168,5 +168,21 @@ object TicketsPlayground extends cask.MainRoutes {
     upickle.default.write(TicketAI.structuredData(ticketRead, prompt = promptEval))
   }
 
+  @cask.post("/map-reduce-summarize")
+  def mapReduceSummarize(request: cask.Request) = {
+    val ticketsRead = upickle.default.read[List[TicketStore.Ticket]](request.text())
+
+    val ticketsSummary = ticketsRead.map( ticket => {
+      val promptEval =
+        """Summarize the review below in a short sentence. Be creative, but be as close to the text below as possible:
+      """ + ticket.message +
+          """
+            |
+            |""".stripMargin
+      TicketAI.structuredData(ticket, prompt = promptEval)
+    }).map(_.product).flatten.reduce((x,y) => x + "\n" + y)
+    ticketsSummary
+  }
+
   initialize()
 }
