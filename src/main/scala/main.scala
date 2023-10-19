@@ -19,6 +19,11 @@ import io.circe.parser.*
 import io.circe.syntax.*
 import io.circe.KeyDecoder.decodeKeyString
 import upickle.default._
+import cats.arrow.FunctionK
+import cats.{Id, ~>}
+import scala.collection.mutable
+import cats.free.Free
+import cats.free.Free.liftF
 
 object TicketStore {
   case class Ticket(message: String, author: String) derives ReadWriter
@@ -84,6 +89,113 @@ object TicketAI {
   }
 }
 
+object TicketFree {
+  //1. Create an ADT to represent our grammar. Each rule corresponds to System, User, Assistant Messages.
+  //Accumulated response is added back to the mutable Seq of Message Spec to continue the context.
+  sealed trait ChatStoreA[A]
+  case class SystemSays(content: String) extends ChatStoreA[Unit]
+  case class UserSays(content: String) extends ChatStoreA[Unit]
+  case class AssistantSays(content: String) extends ChatStoreA[Unit]
+
+  case object ExecuteChat extends ChatStoreA[String]
+
+//  Seq(
+//    MessageSpec(role = ChatRole.System, content = "You are a helpful assistant."),
+//    MessageSpec(role = ChatRole.User, content = "Who won the world series in 2020?"),
+//    MessageSpec(role = ChatRole.Assistant, content = "The Los Angeles Dodgers won the World Series in 2020."),
+//    MessageSpec(role = ChatRole.User, content = prompt))
+
+  //2. Create a type based on Free[_] and KVStoreA[_]
+
+  type ChatStore[A] = Free[ChatStoreA, A]
+
+  //3. Create smart constructors for KVStore[_] using liftF.
+
+  // SystemSays returns nothing (i.e. Unit). Mutable Seq is updated
+  def systemSays(content: String): ChatStore[Unit] =
+    liftF[ChatStoreA, Unit](SystemSays(content))
+
+  def userSays(content: String): ChatStore[Unit] =
+    liftF[ChatStoreA, Unit](UserSays(content))
+
+  def assistantSays(content: String): ChatStore[Unit] =
+    liftF[ChatStoreA, Unit](AssistantSays(content))
+
+  def executeChat(): ChatStore[String] =
+    liftF[ChatStoreA, String](ExecuteChat)
+
+  // 3. Build a program
+  def program: ChatStore[String] =
+    for {
+      _ <- systemSays("You are a helpful assistant.")
+      _ <- userSays("Who won the world series in 2020?")
+      _ <- assistantSays("The Los Angeles Dodgers won the World Series in 2020.")
+      _ <- userSays("Who won the most recent cricket world cup?")
+      result <- executeChat()
+    } yield result
+
+  // the program will crash if a type is incorrectly specified.
+  def impureCompiler: ChatStoreA ~> Id = {
+    new(ChatStoreA ~> Id) {
+
+      // a very simple (and imprecise) chat archive
+      var chats = scala.collection.mutable.ListBuffer[MessageSpec]()
+
+      def apply[A](fa: ChatStoreA[A]): Id[A] = {
+        fa match {
+          case SystemSays(content) =>
+            println(s"system says $content")
+            chats += MessageSpec(role = ChatRole.System, content = content)
+            ()
+          case UserSays(content) =>
+            println(s"user says $content")
+            chats += MessageSpec(role = ChatRole.User, content = content)
+            //get response and place it inside ?
+            ()
+          case AssistantSays(content) =>
+            println(s"assistant says $content")
+            chats += MessageSpec(role = ChatRole.Assistant, content = content)
+            ()
+          case ExecuteChat =>
+            println(s"executing chat")
+            helperChatAI(chats.toSeq).asInstanceOf[A]
+        }
+      }
+    }
+  }
+
+    def getOutcome() = {
+      val outcome: Id[String] = program.foldMap(impureCompiler)
+      outcome.asInstanceOf[String]
+    }
+
+    //helper function to execute the chat for a prompt
+    def helperChatAI(messages: Seq[MessageSpec]): String = {
+      implicit val ec = ExecutionContext.global
+      implicit val materializer = Materializer(ActorSystem())
+
+      val config = ConfigFactory.load("openai-scala-client.conf")
+      val service = OpenAIServiceFactory(config)
+
+      println(messages.length)
+
+      val createChatCompletionSettings = CreateChatCompletionSettings(
+        model = ModelId.gpt_3_5_turbo
+      )
+
+      val result = Await.result(service.createChatCompletion(
+        messages = messages,
+        settings = createChatCompletionSettings
+      ).map { chatCompletion =>
+        chatCompletion.choices.head.message.content
+      }, Duration.Inf)
+
+      service.close()
+
+      result
+    }
+}
+
 object TicketsPlayground extends cask.MainRoutes {
   override def host: String = "0.0.0.0"
 
@@ -145,7 +257,7 @@ object TicketsPlayground extends cask.MainRoutes {
     val ticketRead = upickle.default.read[TicketStore.Ticket](request.text())
 
     val promptEval =
-      """Determine the sentiment of the product review below. Be specific and answer with positive, negative, or neutral. One word response only.
+      """Determine the sentiment of the product review below. Be specific and answer with Positive, Negative, or Neutral. One word response only.
         """ + ticketRead.message +
         """
           |
@@ -180,8 +292,45 @@ object TicketsPlayground extends cask.MainRoutes {
             |
             |""".stripMargin
       TicketAI.structuredData(ticket, prompt = promptEval)
-    }).map(_.product).flatten.reduce((x,y) => x + "\n" + y)
+    }).flatMap(_.product).reduce((x,y) => x + "\n" + y)
     ticketsSummary
+  }
+
+  @cask.post("/map-reduce-set-tags")
+  def mapReduceSetTags(request: cask.Request) = {
+    val ticketsRead = upickle.default.read[List[TicketStore.Ticket]](request.text())
+
+    val ticketsSummary = ticketsRead.map(ticket => {
+      val promptEval =
+        """Determine upto three tags for the below review. Be specific and descriptive and answer with upto 3 comma-separated one word tags only. Hypenate if requried to ensure each tag is mapped to a single contiguous word.
+    """ + ticket.message +
+          """
+            |
+            |""".stripMargin
+      TicketAI.structuredData(ticket, prompt = promptEval)
+    }).flatMap(_.product).reduce((x, y) => x + "\n" + y)
+    ticketsSummary
+  }
+
+  @cask.post("/map-reduce-sentiment")
+  def mapReduceSentiment(request: cask.Request) = {
+    val ticketsRead = upickle.default.read[List[TicketStore.Ticket]](request.text())
+
+    val ticketsSummary = ticketsRead.map(ticket => {
+      val promptEval =
+        """Determine the sentiment of the product review below. Be specific and answer with Positive, Negative, or Neutral. One word response only.
+          """ + ticket.message +
+          """
+            |
+            |""".stripMargin
+      TicketAI.structuredData(ticket, prompt = promptEval)
+    }).flatMap(_.product).reduce((x, y) => x + "\n" +  y)
+    ticketsSummary
+  }
+
+  @cask.get("/free-outcome")
+  def freeOutcome(request: cask.Request) = {
+    TicketFree.getOutcome().toString
   }
 
   initialize()
