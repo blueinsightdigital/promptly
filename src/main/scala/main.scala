@@ -125,14 +125,7 @@ object TicketFree {
     liftF[ChatStoreA, String](ExecuteChat)
 
   // 3. Build a program
-  def program: ChatStore[String] =
-    for {
-      _ <- systemSays("You are a helpful assistant.")
-      _ <- userSays("Who won the world series in 2020?")
-      _ <- assistantSays("The Los Angeles Dodgers won the World Series in 2020.")
-      _ <- userSays("Who won the most recent cricket world cup?")
-      result <- executeChat()
-    } yield result
+  // anywhere in the code
 
   // the program will crash if a type is incorrectly specified.
   def impureCompiler: ChatStoreA ~> Id = {
@@ -164,7 +157,7 @@ object TicketFree {
     }
   }
 
-    def getOutcome() = {
+    def getOutcome(program: ChatStore[String]) = {
       val outcome: Id[String] = program.foldMap(impureCompiler)
       outcome.asInstanceOf[String]
     }
@@ -330,7 +323,18 @@ object TicketsPlayground extends cask.MainRoutes {
 
   @cask.get("/free-outcome")
   def freeOutcome(request: cask.Request) = {
-    TicketFree.getOutcome().toString
+    import TicketFree._
+
+    val program: ChatStore[String] =
+      for {
+        _ <- systemSays("You are a helpful assistant.")
+        _ <- userSays("Who won the world series in 2020?")
+        _ <- assistantSays("The Los Angeles Dodgers won the World Series in 2020.")
+        _ <- userSays("Who won the most recent cricket world cup?")
+        result <- executeChat()
+      } yield result
+
+    TicketFree.getOutcome(program).toString
   }
 
   initialize()
