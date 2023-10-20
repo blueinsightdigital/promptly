@@ -7,9 +7,11 @@ import io.cequence.openaiscala.service.*
 import io.cequence.openaiscala.domain.response.*
 import io.cequence.openaiscala.domain.ModelId
 import com.typesafe.config.*
+import digital.blueinsight.promptly.TicketAI.{ProductType, SentimentType, SubjectType, TagsType}
 import io.cequence.openaiscala.domain.settings.CreateCompletionSettings
 import io.cequence.openaiscala.domain.{ChatRole, MessageSpec}
 import io.cequence.openaiscala.domain.settings.CreateChatCompletionSettings
+
 import scala.concurrent.*
 import scala.concurrent.duration.Duration
 import io.undertow.Undertow
@@ -18,12 +20,13 @@ import io.circe.generic.auto.*
 import io.circe.parser.*
 import io.circe.syntax.*
 import io.circe.KeyDecoder.decodeKeyString
+
 import upickle.default._
 import cats.arrow.FunctionK
 import cats.{Id, ~>}
-import scala.collection.mutable
 import cats.free.Free
 import cats.free.Free.liftF
+import scala.collection.mutable
 
 object TicketStore {
   case class Ticket(message: String, author: String) derives ReadWriter
@@ -35,7 +38,13 @@ object TicketStore {
 
 }
 object TicketAI {
-  def structuredData(ticket: TicketStore.Ticket, prompt: String): TicketStore.EnrichedTicket = {
+  sealed trait FieldType
+  case object ProductType extends FieldType
+  case object SubjectType extends FieldType
+  case object SentimentType extends FieldType
+  case object TagsType extends FieldType
+
+  def structuredData(ticket: TicketStore.Ticket, prompt: String, fieldType: FieldType): TicketStore.EnrichedTicket = {
     implicit val ec = ExecutionContext.global
     implicit val materializer = Materializer(ActorSystem())
 
@@ -80,12 +89,38 @@ object TicketAI {
 
     service.close()
 
-    TicketStore.EnrichedTicket(ticket = ticket,
-      product = Some(result),
-      subject = None,
-      sentiment = None,
-      tags = None
-    )
+    fieldType match {
+      case ProductType => TicketStore.EnrichedTicket(ticket = ticket,
+        product = Some(result),
+        subject = None,
+        sentiment = None,
+        tags = None
+      )
+      case SubjectType => TicketStore.EnrichedTicket(ticket = ticket,
+        product = None,
+        subject = Some(result),
+        sentiment = None,
+        tags = None
+      )
+      case SentimentType => TicketStore.EnrichedTicket(ticket = ticket,
+        product = None,
+        subject = None,
+        sentiment = Some(result),
+        tags = None
+      )
+      case TagsType => TicketStore.EnrichedTicket(ticket = ticket,
+        product = None,
+        subject = None,
+        sentiment = None,
+        tags = Some(List(result))
+      )
+      case _ => TicketStore.EnrichedTicket(ticket = ticket,
+        product = None,
+        subject = None,
+        sentiment = None,
+        tags = None
+      )
+    }
   }
 }
 
@@ -222,7 +257,7 @@ object TicketsPlayground extends cask.MainRoutes {
         | I purchased this mixer from KitchenAid a few weeks ago and found it ridiculously useful to juice up my day.
         |""".stripMargin
 
-    upickle.default.write(TicketAI.structuredData(ticketRead, prompt = prompt))
+    upickle.default.write(TicketAI.structuredData(ticketRead, prompt = prompt, fieldType = ProductType))
   }
 
   @cask.post("/summarize-data")
@@ -242,7 +277,7 @@ object TicketsPlayground extends cask.MainRoutes {
         |""".stripMargin
 
 
-    upickle.default.write(TicketAI.structuredData(ticketRead, prompt = promptEval))
+    upickle.default.write(TicketAI.structuredData(ticketRead, prompt = promptEval, fieldType = SubjectType))
   }
 
   @cask.post("/determine-sentiment")
@@ -256,7 +291,7 @@ object TicketsPlayground extends cask.MainRoutes {
           |
           |""".stripMargin
 
-    upickle.default.write(TicketAI.structuredData(ticketRead, prompt = promptEval))
+    upickle.default.write(TicketAI.structuredData(ticketRead, prompt = promptEval, fieldType = SentimentType))
   }
 
   @cask.post("/set-tags")
@@ -270,7 +305,7 @@ object TicketsPlayground extends cask.MainRoutes {
           |
           |""".stripMargin
 
-    upickle.default.write(TicketAI.structuredData(ticketRead, prompt = promptEval))
+    upickle.default.write(TicketAI.structuredData(ticketRead, prompt = promptEval, fieldType = TagsType))
   }
 
   @cask.post("/map-reduce-summarize")
@@ -284,26 +319,26 @@ object TicketsPlayground extends cask.MainRoutes {
           """
             |
             |""".stripMargin
-      TicketAI.structuredData(ticket, prompt = promptEval)
-    }).flatMap(_.product).reduce((x,y) => x + "\n" + y)
+      TicketAI.structuredData(ticket, prompt = promptEval, fieldType = SubjectType)
+    }).flatMap(_.subject).reduce((x,y) => x + "\n" + y)
     ticketsSummary
   }
 
-  @cask.post("/map-reduce-set-tags")
-  def mapReduceSetTags(request: cask.Request) = {
-    val ticketsRead = upickle.default.read[List[TicketStore.Ticket]](request.text())
-
-    val ticketsSummary = ticketsRead.map(ticket => {
-      val promptEval =
-        """Determine upto three tags for the below review. Be specific and descriptive and answer with upto 3 comma-separated one word tags only. Hypenate if requried to ensure each tag is mapped to a single contiguous word.
-    """ + ticket.message +
-          """
-            |
-            |""".stripMargin
-      TicketAI.structuredData(ticket, prompt = promptEval)
-    }).flatMap(_.product).reduce((x, y) => x + "\n" + y)
-    ticketsSummary
-  }
+//  @cask.post("/map-reduce-set-tags")
+//  def mapReduceSetTags(request: cask.Request) = {
+//    val ticketsRead = upickle.default.read[List[TicketStore.Ticket]](request.text())
+//
+//    val ticketsSummary = ticketsRead.map(ticket => {
+//      val promptEval =
+//        """Determine upto three tags for the below review. Be specific and descriptive and answer with upto 3 comma-separated one word tags only. Hypenate if requried to ensure each tag is mapped to a single contiguous word.
+//    """ + ticket.message +
+//          """
+//            |
+//            |""".stripMargin
+//      TicketAI.structuredData(ticket, prompt = promptEval, fieldType = TagsType)
+//    }).flatMap(_.tags).reduce((x, y) => x + y)
+//    ticketsSummary
+//  }
 
   @cask.post("/map-reduce-sentiment")
   def mapReduceSentiment(request: cask.Request) = {
@@ -316,8 +351,8 @@ object TicketsPlayground extends cask.MainRoutes {
           """
             |
             |""".stripMargin
-      TicketAI.structuredData(ticket, prompt = promptEval)
-    }).flatMap(_.product).reduce((x, y) => x + "\n" +  y)
+      TicketAI.structuredData(ticket, prompt = promptEval, fieldType = SentimentType)
+    }).flatMap(_.sentiment).reduce((x, y) => x + "\n" +  y)
     ticketsSummary
   }
 
@@ -334,7 +369,7 @@ object TicketsPlayground extends cask.MainRoutes {
         result <- executeChat()
       } yield result
 
-    TicketFree.getOutcome(program).toString
+    TicketFree.getOutcome(program)
   }
 
   initialize()
