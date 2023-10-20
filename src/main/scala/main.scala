@@ -34,10 +34,10 @@ object GlobalConstants {
 object TicketStore {
   case class Ticket(message: String, author: String) derives ReadWriter
   case class EnrichedTicket(ticket: Ticket,
-                            product: Option[String],
-                            subject: Option[String],
-                            sentiment: Option[String],
-                            tags:Option[List[String]]) derives ReadWriter
+                            product: Option[String] = None,
+                            subject: Option[String] = None,
+                            sentiment: Option[String] = None,
+                            tags:Option[List[String]] = None) derives ReadWriter
 
 }
 object TicketAI {
@@ -257,7 +257,7 @@ object TicketsPlayground extends cask.MainRoutes {
 //        |""".stripMargin
 
     val promptEval =
-      """Summarize the review below in a short sentence. Be creative, but be as close to the text below as possible:
+      """Summarize the review below in a heading. Heading should be a short sentence of less than 15 words. Be creative, but be as close to the text below as possible:
         """+ticketRead.message+"""
         |
         |""".stripMargin
