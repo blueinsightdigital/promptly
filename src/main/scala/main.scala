@@ -28,6 +28,9 @@ import cats.free.Free
 import cats.free.Free.liftF
 import scala.collection.mutable
 
+object GlobalConstants {
+  val model = ModelId.gpt_3_5_turbo
+}
 object TicketStore {
   case class Ticket(message: String, author: String) derives ReadWriter
   case class EnrichedTicket(ticket: Ticket,
@@ -44,40 +47,23 @@ object TicketAI {
   case object SentimentType extends FieldType
   case object TagsType extends FieldType
 
-  def structuredData(ticket: TicketStore.Ticket, prompt: String, fieldType: FieldType): TicketStore.EnrichedTicket = {
+  def getOutcome(ticket: TicketStore.Ticket, prompt: String, fieldType: FieldType): TicketStore.EnrichedTicket = {
     implicit val ec = ExecutionContext.global
     implicit val materializer = Materializer(ActorSystem())
 
     val config = ConfigFactory.load("openai-scala-client.conf")
     val service = OpenAIServiceFactory(config)
 
-    //  service.listModels.map(models =>
-    //    models.foreach(println)
-    //  )
-
-    //  val models: Future[Seq[ModelInfo]] = service.listModels
-
-    //  models.map(modelSeq => modelSeq.filter(_.owned_by=="openai").foreach(println))
-
-    //  service.retrieveModel(ModelId.text_davinci_003).map(model =>
-    //    println(model.getOrElse("N/A"))
-    //  )
     println(prompt)
-//    val result = Await.result(service.createCompletion(ticket.message,
-//      settings = CreateCompletionSettings(model = ModelId.gpt_3_5_turbo)
-//    ).map(completion =>
-//      (completion.choices.head.text)
-//    ), Duration.Inf)
+
 
     val createChatCompletionSettings = CreateChatCompletionSettings(
-      model = ModelId.gpt_3_5_turbo
+      model = GlobalConstants.model
     )
 
     val messages: Seq[MessageSpec] = Seq(
       MessageSpec(role = ChatRole.System, content = "You are a helpful assistant."),
-//      MessageSpec(role = ChatRole.User, content = "Who won the world series in 2020?"),
-//      MessageSpec(role = ChatRole.Assistant, content = "The Los Angeles Dodgers won the World Series in 2020."),
-      MessageSpec(role = ChatRole.User, content = prompt),
+      MessageSpec(role = ChatRole.User, content = prompt)
     )
 
     val result = Await.result(service.createChatCompletion(
@@ -208,7 +194,7 @@ object TicketFree {
       println(messages.length)
 
       val createChatCompletionSettings = CreateChatCompletionSettings(
-        model = ModelId.gpt_3_5_turbo
+        model = GlobalConstants.model
       )
 
       val result = Await.result(service.createChatCompletion(
@@ -257,7 +243,7 @@ object TicketsPlayground extends cask.MainRoutes {
         | I purchased this mixer from KitchenAid a few weeks ago and found it ridiculously useful to juice up my day.
         |""".stripMargin
 
-    upickle.default.write(TicketAI.structuredData(ticketRead, prompt = prompt, fieldType = ProductType))
+    upickle.default.write(TicketAI.getOutcome(ticketRead, prompt = prompt, fieldType = ProductType))
   }
 
   @cask.post("/summarize-data")
@@ -277,7 +263,7 @@ object TicketsPlayground extends cask.MainRoutes {
         |""".stripMargin
 
 
-    upickle.default.write(TicketAI.structuredData(ticketRead, prompt = promptEval, fieldType = SubjectType))
+    upickle.default.write(TicketAI.getOutcome(ticketRead, prompt = promptEval, fieldType = SubjectType))
   }
 
   @cask.post("/determine-sentiment")
@@ -291,7 +277,7 @@ object TicketsPlayground extends cask.MainRoutes {
           |
           |""".stripMargin
 
-    upickle.default.write(TicketAI.structuredData(ticketRead, prompt = promptEval, fieldType = SentimentType))
+    upickle.default.write(TicketAI.getOutcome(ticketRead, prompt = promptEval, fieldType = SentimentType))
   }
 
   @cask.post("/set-tags")
@@ -305,7 +291,7 @@ object TicketsPlayground extends cask.MainRoutes {
           |
           |""".stripMargin
 
-    upickle.default.write(TicketAI.structuredData(ticketRead, prompt = promptEval, fieldType = TagsType))
+    upickle.default.write(TicketAI.getOutcome(ticketRead, prompt = promptEval, fieldType = TagsType))
   }
 
   @cask.post("/map-reduce-summarize")
@@ -319,7 +305,7 @@ object TicketsPlayground extends cask.MainRoutes {
           """
             |
             |""".stripMargin
-      TicketAI.structuredData(ticket, prompt = promptEval, fieldType = SubjectType)
+      TicketAI.getOutcome(ticket, prompt = promptEval, fieldType = SubjectType)
     }).flatMap(_.subject).reduce((x,y) => x + "\n" + y)
     ticketsSummary
   }
@@ -335,7 +321,7 @@ object TicketsPlayground extends cask.MainRoutes {
           """
             |
             |""".stripMargin
-      TicketAI.structuredData(ticket, prompt = promptEval, fieldType = TagsType)
+      TicketAI.getOutcome(ticket, prompt = promptEval, fieldType = TagsType)
     }).flatMap(_.tags).toList.flatten.reduce((x, y) => x + "\n" + y)
     ticketsSummary
   }
@@ -351,7 +337,7 @@ object TicketsPlayground extends cask.MainRoutes {
           """
             |
             |""".stripMargin
-      TicketAI.structuredData(ticket, prompt = promptEval, fieldType = SentimentType)
+      TicketAI.getOutcome(ticket, prompt = promptEval, fieldType = SentimentType)
     }).flatMap(_.sentiment).reduce((x, y) => x + "\n" +  y)
     ticketsSummary
   }
