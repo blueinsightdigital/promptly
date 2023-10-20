@@ -324,21 +324,21 @@ object TicketsPlayground extends cask.MainRoutes {
     ticketsSummary
   }
 
-//  @cask.post("/map-reduce-set-tags")
-//  def mapReduceSetTags(request: cask.Request) = {
-//    val ticketsRead = upickle.default.read[List[TicketStore.Ticket]](request.text())
-//
-//    val ticketsSummary = ticketsRead.map(ticket => {
-//      val promptEval =
-//        """Determine upto three tags for the below review. Be specific and descriptive and answer with upto 3 comma-separated one word tags only. Hypenate if requried to ensure each tag is mapped to a single contiguous word.
-//    """ + ticket.message +
-//          """
-//            |
-//            |""".stripMargin
-//      TicketAI.structuredData(ticket, prompt = promptEval, fieldType = TagsType)
-//    }).flatMap(_.tags).reduce((x, y) => x + y)
-//    ticketsSummary
-//  }
+  @cask.post("/map-reduce-set-tags")
+  def mapReduceSetTags(request: cask.Request) = {
+    val ticketsRead = upickle.default.read[List[TicketStore.Ticket]](request.text())
+
+    val ticketsSummary = ticketsRead.map(ticket => {
+      val promptEval =
+        """Determine upto three tags for the below review. Be specific and descriptive and answer with upto 3 comma-separated one word tags only. Hypenate if requried to ensure each tag is mapped to a single contiguous word.
+    """ + ticket.message +
+          """
+            |
+            |""".stripMargin
+      TicketAI.structuredData(ticket, prompt = promptEval, fieldType = TagsType)
+    }).flatMap(_.tags).toList.flatten.reduce((x, y) => x + "\n" + y)
+    ticketsSummary
+  }
 
   @cask.post("/map-reduce-sentiment")
   def mapReduceSentiment(request: cask.Request) = {
