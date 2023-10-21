@@ -226,7 +226,7 @@ object TicketsPlayground extends cask.MainRoutes {
   @cask.post("/read-request")
   def readRequest(request: cask.Request) = {
     val ticketRead = upickle.default.read[TicketStore.Ticket](request.text())
-    upickle.default.write(ticketRead.author)
+    upickle.default.write(ticketRead)
   }
 
   @cask.post("/structured-data")
@@ -249,19 +249,12 @@ object TicketsPlayground extends cask.MainRoutes {
   @cask.post("/summarize-data")
   def summarizeData(request: cask.Request) = {
     val ticketRead = upickle.default.read[TicketStore.Ticket](request.text())
-//
-//    val prompt =
-//      """Summarize the review below in a short sentence. Be creative, but be as close to the text below as possible:
-//        | If you're a beginner baker like myself, I highly recommend this artisan model. It's user friendly, and I like how it came with the three different attachments and a pouring shield as well. Also the 5 quart is honestly enough room for an at home baker. However, if you plan to be baking huge batches for a commercial business this one may not be for you and you may want to opt out for a bigger mixer.
-//        |
-//        |""".stripMargin
 
     val promptEval =
       """Summarize the review below in a heading. Heading should be a short sentence of less than 15 words. Be creative, but be as close to the text below as possible:
         """+ticketRead.message+"""
         |
         |""".stripMargin
-
 
     upickle.default.write(TicketAI.getOutcome(ticketRead, prompt = promptEval, fieldType = SubjectType))
   }
