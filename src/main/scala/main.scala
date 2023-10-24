@@ -214,6 +214,7 @@ object TicketsPlayground extends cask.MainRoutes {
   override def host: String = "0.0.0.0"
 
   override def port: Int = 80
+  def commonHeaders = Seq("Access-Control-Allow-Origin" -> "http://127.0.0.1:5173")
 
   val originalTicket = TicketStore.Ticket(
     message = "I purchased this mixer from KitchenAid a few weeks ago and found it ridiculously useful to juice up my day",
@@ -348,7 +349,9 @@ object TicketsPlayground extends cask.MainRoutes {
         result <- executeChat()
       } yield result
 
-    TicketFree.getOutcome(program)
+    cask.Response(
+      data = TicketFree.getOutcome(program),
+      headers = commonHeaders)
   }
 
   initialize()
